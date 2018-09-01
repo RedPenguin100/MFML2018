@@ -64,7 +64,7 @@ namespace DataSetsSparsity
                 //array size - new section 
                 int Mterms = globalNorms.Count;
                 int hopp = userConfig.hopping == -1 ? 2 * RFdecTreeArr.Count() : userConfig.hopping;
-                int steps = Mterms / hopp;
+                int steps = 1000 / hopp;
 
                 List<int> indeces = new List<int>();    
                 if (userConfig.nonLinearHopping)
@@ -90,14 +90,14 @@ namespace DataSetsSparsity
 
                 wf.Program.applyFor(0, steps, i =>
                 {
+                   
                     int j = userConfig.nonLinearHopping ? indeces[i] : i * hopp;
                     errorRyByWaveletsOfOne[i] = testDecisionForest(trainingArr, db.training_dt, db.training_label, RFdecTreeArr, globalNorms[j], userConfig.errTypeTest, false);
-                    errorRyByWaveletsOfOnevalid[i] = testDecisionForest(validatingArr, db.validation_dt, db.validation_label, RFdecTreeArr, globalNorms[j], userConfig.errTypeTest, false);
-                    errorRyByWaveletsOfOneTest[i] = testDecisionForest(testingArr, db.testing_dt, db.testing_label, RFdecTreeArr, globalNorms[j], userConfig.errTypeTest, false);
+                    // errorRyByWaveletsOfOnevalid[i] = testDecisionForest(validatingArr, db.validation_dt, db.validation_label, RFdecTreeArr, globalNorms[j], userConfig.errTypeTest, false);
+                    // errorRyByWaveletsOfOneTest[i] = testDecisionForest(testingArr, db.testing_dt, db.testing_label, RFdecTreeArr, globalNorms[j], userConfig.errTypeTest, false);
                     NwaveletsInWaveletByWaveletOfOne[i] = j + 1;
                 });
-
-                int minIndex = Array.IndexOf(errorRyByWaveletsOfOnevalid, errorRyByWaveletsOfOnevalid.Min());
+                int minIndex = steps - 1;
                 int Mterm = (int)NwaveletsInWaveletByWaveletOfOne[minIndex];
                 normthreshold = globalNorms[Mterm - 1];
 
@@ -129,99 +129,7 @@ namespace DataSetsSparsity
             #endregion
 
 
-            //build forest without validation
-            for (int i = 0; i < validatingArr.Count(); i++)
-                    trainingArr.Add(validatingArr[i]);
-            RFdecTreeArr = new List<GeoWave>[userConfig.nTrees];
-            wf.Program.applyFor(0, userConfig.nTrees, i =>
-            {
-                List<int> trainingArrRF;
-                trainingArrRF = Bagging(trainingArr, userConfig.bagginPercent, i);
-                trainingArrRF_indecesList[i] = trainingArrRF;
-                bool[] Dim2Take = getDim2Take(i);
-                decicionTree decTreeRF = new decicionTree(db, Dim2Take);
-                RFdecTreeArr[i] = decTreeRF.getdecicionTree(trainingArrRF, boundingBox, i);
-            });
-
-            if (userConfig.saveTrees)
-            {
-                if (!System.IO.Directory.Exists(analysisFolderName + "\\archive")) 
-                    System.IO.Directory.CreateDirectory(analysisFolderName + "\\archive");
-                for (int i = 0; i < RFdecTreeArr.Count(); i++)
-                {
-                    wf.Program.printWaveletsProperties(RFdecTreeArr[i], analysisFolderName + "\\archive\\waveletsPropertiesTree_" + i.ToString() + ".txt");
-                }
-            }
-
-            //SET NORM THRESHOLD
-            normthreshold = userConfig.fixThreshold == -1 ? normthreshold : userConfig.fixThreshold;
-
-            double[] VI = new double[db.training_dt[0].Count()];//array of variables for importance
-            globalNorms = new List<double>();
-            for (int i = 0; i < RFdecTreeArr.Count(); i++)
-                for (int j = 0; j < RFdecTreeArr[i].Count; j++)
-                {
-                    globalNorms.Add(RFdecTreeArr[i][j].norm);
-                    if (RFdecTreeArr[i][j].dimIndex >= 0 && RFdecTreeArr[i][j].norm >= normthreshold)
-                        VI[RFdecTreeArr[i][j].dimIndex] += RFdecTreeArr[i][j].norm;
-
-                }                    
-            globalNorms = globalNorms.OrderByDescending(d => d).ToList();
-
-            wf.Program.printList(VI.ToList(), analysisFolderName + "\\VI.txt");
-
-            //SET NORM THRESHOLD BY MTERMS IF GIVVEN
-            if (userConfig.m_terms != -1 && userConfig.m_terms < globalNorms.Count)
-                normthreshold = globalNorms[userConfig.m_terms];
-
-            //PREPARE FOR TESTING
-            if (userConfig.setClassification)
-                setMidpoint(db.validation_label);
-
-            //SORT each tree BY ID 
-            Parallel.For(0, RFdecTreeArr.Count(), i =>
-            {
-                RFdecTreeArr[i] = RFdecTreeArr[i].OrderBy(o => o.ID).ToList();
-            });
-
-            //IF TEST FULL RF (regardles to wf) 
-            if (userConfig.testRF)
-            {
-                double[] tmperrorRyByForest = new double[RFdecTreeArr.Count()];
-                double[] tmperrorValidByForest = new double[RFdecTreeArr.Count()];
-                double[] tmperrorTrainByForest = new double[RFdecTreeArr.Count()];
-                tmperrorRyByForest = testDecisionTreeManyRFnew(testingArr, db.testing_dt, db.testing_label, RFdecTreeArr, 0.0, userConfig.errTypeTest);
-                tmperrorValidByForest = testDecisionTreeManyRFnew(validatingArr, db.validation_dt, db.validation_label, RFdecTreeArr, 0.0, userConfig.errTypeTest);
-                tmperrorTrainByForest = testDecisionTreeManyRFnew(trainingArr, db.training_dt, db.training_label, RFdecTreeArr, 0.0, userConfig.errTypeTest);
-                List<double> tmpNwaveletsInRF = new List<double>();
-                for (int i = 0; i < RFdecTreeArr.Count(); i++)
-                    tmpNwaveletsInRF.Add(RFdecTreeArr[i].Count());
-
-                wf.Program.printList(tmperrorRyByForest.ToList(), analysisFolderName + "\\TesterrorByForest.txt");
-                wf.Program.printList(tmperrorValidByForest.ToList(), analysisFolderName + "\\ValiderrorByForest.txt");
-                wf.Program.printList(tmperrorTrainByForest.ToList(), analysisFolderName + "\\TrainerrorByForest.txt");
-                wf.Program.printList(tmpNwaveletsInRF, analysisFolderName + "\\NwaveletsInRF.txt");
-            }
-
-            //IF TEST RF WITH THRESHOLD ON WAVELETS NORM
-            if (userConfig.testWf )
-            {
-                double[] tmperrorRyByForest = new double[RFdecTreeArr.Count()];
-                tmperrorRyByForest = testDecisionTreeManyRFnew(testingArr, db.testing_dt, db.testing_label, RFdecTreeArr, normthreshold, userConfig.errTypeTest);
-                double[] tmperrorValidRyByForest = new double[RFdecTreeArr.Count()];
-                tmperrorValidRyByForest = testDecisionTreeManyRFnew(validatingArr, db.validation_dt, db.validation_label, RFdecTreeArr, normthreshold, userConfig.errTypeTest);
-                double[] tmperrorTrainRyByForest = new double[RFdecTreeArr.Count()];
-                tmperrorTrainRyByForest = testDecisionTreeManyRFnew(trainingArr, db.training_dt, db.training_label, RFdecTreeArr, normthreshold, userConfig.errTypeTest);
-
-                List<double> tmpNwaveletsInRF = new List<double>();
-                for (int i = 0; i < RFdecTreeArr.Count(); i++)
-                    tmpNwaveletsInRF.Add(RFdecTreeArr[i].Count());
-
-                wf.Program.printList(tmperrorRyByForest.ToList(), analysisFolderName + "\\TesterrorByForestWithThreshold" + normthreshold.ToString() + ".txt");
-                wf.Program.printList(tmperrorValidRyByForest.ToList(), analysisFolderName + "\\ValiderrorByForestWithThreshold" + normthreshold.ToString() + ".txt");
-                wf.Program.printList(tmperrorTrainRyByForest.ToList(), analysisFolderName + "\\TrainerrorByForestWithThreshold" + normthreshold.ToString() + ".txt");
-                wf.Program.printList(tmpNwaveletsInRF, analysisFolderName + "\\NwaveletsInRFWithThreshold" + normthreshold.ToString() + ".txt");
-            }
+           
             #endregion
 
             //add VI
